@@ -1,0 +1,5 @@
+- [x] Extract `QaResultCard.tsx` shared component
+- [x] Refactor `UniversalSearch.tsx` to use `QaResultCard.tsx`
+- [x] Create `AiChat.tsx` chat interface
+- [x] Update route in `App.tsx` for `/chat`
+- [x] Verify build compiles cleanly

@@ -1,8 +1,324 @@
-/*
-(stub) — filled Task 1.2
-*/
-import React from 'react';
+import React, { useState } from 'react';
+import { useNavigate, Link } from 'react-router-dom';
+import { Shield, Search, Laptop, Mail, Lock, Eye, EyeOff, ArrowRight } from 'lucide-react';
+import api from '../services/api';
+import { useAuthStore, User } from '../store/authStore';
+
+interface LoginResponse {
+    access_token: string;
+    token_type: string;
+}
 
 export default function Login() {
-    return null;
+    const navigate = useNavigate();
+    const setToken = useAuthStore((state) => state.setToken);
+    const setUser = useAuthStore((state) => state.setUser);
+
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
+    const [showPassword, setShowPassword] = useState(false);
+    const [rememberMe, setRememberMe] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [loading, setLoading] = useState(false);
+    const [success, setSuccess] = useState(false);
+
+    const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+        e.preventDefault();
+        setError(null);
+        setLoading(true);
+
+        try {
+            // 1. Submit credentials
+            const loginRes = await api.post<LoginResponse>('/auth/login', {
+                email,
+                password,
+            });
+
+            const token = loginRes.data.access_token;
+            setToken(token);
+
+            // 2. Fetch authenticated profile
+            const meRes = await api.get<User>('/auth/me');
+            setUser(meRes.data);
+
+            // 3. Trigger success completion state
+            setSuccess(true);
+
+            // 4. Brief pause for completion feedback
+            const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            await new Promise((resolve) => setTimeout(resolve, prefersReducedMotion ? 50 : 500));
+
+            // 5. Navigate to dashboard
+            navigate('/dashboard');
+        } catch (err: any) {
+            console.error('Login failed:', err);
+            if (err.response?.status === 401) {
+                setError('Incorrect email or password.');
+            } else {
+                setError(err.response?.data?.detail || 'API connection failed. Verify your server is running.');
+            }
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleOAuthRedirect = (provider: string) => {
+        const base = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+        window.location.href = `${base}/auth/${provider}/login`;
+    };
+
+    return (
+        <div className="min-h-screen flex flex-col lg:flex-row bg-lavender-light text-ink font-sans">
+            {/* Left Panel: Marketing Content */}
+            <div className="w-full lg:w-[45%] bg-gradient-to-br from-lavender-light to-lavender-mid p-8 lg:p-12 flex flex-col justify-between relative overflow-hidden min-h-[360px] lg:min-h-screen border-b lg:border-b-0 lg:border-r border-indigo-primary/10">
+                {/* Decorative Dot Grid */}
+                <div className="absolute top-6 right-6 w-12 h-12 grid grid-cols-4 gap-1 opacity-20 text-indigo-primary pointer-events-none">
+                    {[...Array(16)].map((_, i) => (
+                        <div key={i} className="w-1 h-1 rounded-full bg-current" />
+                    ))}
+                </div>
+
+                {/* Logo Section */}
+                <div className="flex items-center space-x-3 z-10">
+                    <div className="w-8 h-8 rounded-lg bg-indigo-primary flex items-center justify-center text-paper font-serif text-lg font-bold shadow-sm">
+                        M
+                    </div>
+                    <div>
+                        <span className="font-serif text-xl font-bold tracking-tight text-indigo-deep block leading-none">
+                            MemoryOS
+                        </span>
+                        <span className="font-mono text-[9px] uppercase tracking-wider text-indigo-deep/50 block mt-0.5">
+                            Personal Knowledge Engine
+                        </span>
+                    </div>
+                </div>
+
+                {/* Branding Hero */}
+                <div className="my-8 lg:my-auto max-w-md z-10">
+                    <h1 className="font-serif text-4xl lg:text-5xl font-normal text-indigo-deep mb-4 leading-tight">
+                        Your digital mind, <br className="hidden lg:inline"/>perfectly recalled.
+                    </h1>
+                    <p className="text-sm text-ink/70 mb-8 leading-relaxed">
+                        Index your documents and screenshots with contextual search logic and offline AI grounding.
+                    </p>
+
+                    {/* Features Lists */}
+                    <div className="space-y-5">
+                        <div className="flex items-start space-x-3.5">
+                            <div className="w-8 h-8 rounded-full bg-indigo-primary/10 flex items-center justify-center text-indigo-primary shrink-0">
+                                <Shield className="w-4 h-4" />
+                            </div>
+                            <div>
+                                <h3 className="text-sm font-semibold text-indigo-deep">Secure Identity Linking</h3>
+                                <p className="text-xs text-ink/60">Fully encrypted local accounts linked with standard providers.</p>
+                            </div>
+                        </div>
+
+                        <div className="flex items-start space-x-3.5">
+                            <div className="w-8 h-8 rounded-full bg-indigo-primary/10 flex items-center justify-center text-indigo-primary shrink-0">
+                                <Search className="w-4 h-4" />
+                            </div>
+                            <div>
+                                <h3 className="text-sm font-semibold text-indigo-deep">Universal Grounded Search</h3>
+                                <p className="text-xs text-ink/60">Retrieved chunks are formatted with strict source citations.</p>
+                            </div>
+                        </div>
+
+                        <div className="flex items-start space-x-3.5">
+                            <div className="w-8 h-8 rounded-full bg-indigo-primary/10 flex items-center justify-center text-indigo-primary shrink-0">
+                                <Laptop className="w-4 h-4" />
+                            </div>
+                            <div>
+                                <h3 className="text-sm font-semibold text-indigo-deep">Multi-Device Dashboard</h3>
+                                <p className="text-xs text-ink/60">Access all metadata, indexes, and document history everywhere.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Bottom SVG Mountains Backdrop */}
+                <div className="absolute bottom-0 left-0 right-0 h-32 opacity-25 pointer-events-none">
+                    <svg className="w-full h-full text-indigo-primary" viewBox="0 0 1440 320" preserveAspectRatio="none" fill="currentColor">
+                        <path d="M0,224L240,160L480,256L720,192L960,288L1200,160L1440,224L1440,320L1200,320L960,320L720,320L480,320L240,320L0,320Z" opacity="0.4" />
+                        <path d="M0,128L240,224L480,160L720,256L960,128L1200,224L1440,160L1440,320L1200,320L960,320L720,320L480,320L240,320L0,320Z" opacity="0.6" />
+                    </svg>
+                </div>
+
+                {/* Footer copyright */}
+                <div className="z-10 mt-6 lg:mt-0">
+                    <span className="font-mono text-[9px] text-indigo-deep/45">
+                        © {new Date().getFullYear()} MemoryOS. All rights reserved.
+                    </span>
+                </div>
+            </div>
+
+            {/* Right Panel: Auth Card */}
+            <div className="w-full lg:w-[55%] flex items-center justify-center p-6 lg:p-12 bg-paper relative">
+                <div className="w-full max-w-[400px] bg-paper p-8 rounded-2xl border border-ink/5 shadow-[0_4px_24px_rgba(30,27,75,0.04)]">
+                    <div className="mb-6">
+                        <h2 className="font-serif text-3xl font-normal text-indigo-deep">
+                            Welcome Back
+                        </h2>
+                        <p className="text-xs text-ink/50 mt-1">
+                            Sign in to access your digital index.
+                        </p>
+                    </div>
+
+                    {/* API Error Box */}
+                    {error && (
+                        <div className="mb-5 p-4 rounded-[4px] border border-status-brick/30 bg-status-brick/5 text-status-brick font-mono text-xs animate-fadeIn">
+                            {error}
+                        </div>
+                    )}
+
+                    <form onSubmit={handleSubmit} className="space-y-4">
+                        {/* Email field */}
+                        <div>
+                            <label className="block text-[11px] font-semibold text-indigo-deep/75 uppercase tracking-wider mb-1.5">
+                                Email Address
+                            </label>
+                            <div className="relative">
+                                <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-ink/30 pointer-events-none">
+                                    <Mail className="w-4 h-4" />
+                                </span>
+                                <input
+                                    type="email"
+                                    required
+                                    placeholder="name@example.com"
+                                    value={email}
+                                    onChange={(e) => setEmail(e.target.value)}
+                                    disabled={loading || success}
+                                    className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-ink/15 bg-paper text-ink placeholder-ink/25 focus:outline-none focus:border-indigo-primary focus:ring-1 focus:ring-indigo-primary transition-all duration-150 motion-reduce:transition-none focus:scale-[1.01] focus:shadow-sm disabled:opacity-50 text-sm"
+                                />
+                            </div>
+                        </div>
+
+                        {/* Password field */}
+                        <div>
+                            <label className="block text-[11px] font-semibold text-indigo-deep/75 uppercase tracking-wider mb-1.5">
+                                Password
+                            </label>
+                            <div className="relative">
+                                <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-ink/30 pointer-events-none">
+                                    <Lock className="w-4 h-4" />
+                                </span>
+                                <input
+                                    type={showPassword ? 'text' : 'password'}
+                                    required
+                                    placeholder="••••••••"
+                                    value={password}
+                                    onChange={(e) => setPassword(e.target.value)}
+                                    disabled={loading || success}
+                                    className="w-full pl-10 pr-10 py-2.5 rounded-lg border border-ink/15 bg-paper text-ink placeholder-ink/25 focus:outline-none focus:border-indigo-primary focus:ring-1 focus:ring-indigo-primary transition-all duration-150 motion-reduce:transition-none focus:scale-[1.01] focus:shadow-sm disabled:opacity-50 text-sm"
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() => setShowPassword(!showPassword)}
+                                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-ink/30 hover:text-ink/65 transition-colors"
+                                >
+                                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Remember Me & Tooltipped Forgot Password */}
+                        <div className="flex items-center justify-between pt-1">
+                            <label className="flex items-center space-x-2 text-xs text-ink/50 cursor-pointer select-none">
+                                <input
+                                    type="checkbox"
+                                    checked={rememberMe}
+                                    onChange={(e) => setRememberMe(e.target.checked)}
+                                    className="rounded border-ink/20 text-indigo-primary focus:ring-indigo-primary/30"
+                                />
+                                <span>Remember me</span>
+                            </label>
+
+                            <div className="relative group inline-block">
+                                <button
+                                    type="button"
+                                    disabled
+                                    className="text-xs text-indigo-primary/40 cursor-not-allowed font-medium hover:underline"
+                                >
+                                    Forgot password?
+                                </button>
+                                <span className="absolute bottom-full right-0 mb-1.5 w-24 bg-indigo-deep text-paper text-[9px] text-center py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity duration-150 pointer-events-none font-mono tracking-wider">
+                                    COMING SOON
+                                </span>
+                            </div>
+                        </div>
+
+                        {/* Primary login button */}
+                        <button
+                            type="submit"
+                            disabled={loading || success}
+                            className="relative w-full h-[44px] rounded-lg bg-indigo-deep hover:bg-indigo-deep/95 hover:-translate-y-[0.5px] active:translate-y-0 text-paper font-medium text-sm transition-all duration-150 motion-reduce:transition-none shadow-sm disabled:opacity-75 disabled:cursor-not-allowed flex items-center justify-center mt-6"
+                        >
+                            {success ? (
+                                <span className="flex items-center space-x-2 text-paper animate-pulse">
+                                    <svg className="h-4 w-4 text-paper" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                                    </svg>
+                                    <span>Welcome back</span>
+                                </span>
+                            ) : loading ? (
+                                <span className="flex items-center space-x-2 text-paper">
+                                    <svg className="animate-spin h-4 w-4 text-paper" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                                    </svg>
+                                    <span>Signing in…</span>
+                                </span>
+                            ) : (
+                                <span className="flex items-center justify-center space-x-1">
+                                    <span>Sign In</span>
+                                    <ArrowRight className="w-4 h-4" />
+                                </span>
+                            )}
+                        </button>
+                    </form>
+
+                    {/* Divider */}
+                    <div className="relative my-6 flex items-center justify-center">
+                        <div className="absolute inset-x-0 border-t border-ink/10" />
+                        <span className="relative px-3 bg-paper text-[10px] uppercase tracking-wider text-ink/35 font-mono select-none">
+                            or continue with
+                        </span>
+                    </div>
+
+                    {/* OAuth login buttons */}
+                    <div className="grid grid-cols-2 gap-3.5">
+                        <button
+                            type="button"
+                            onClick={() => handleOAuthRedirect('google')}
+                            className="flex items-center justify-center py-2.5 px-4 rounded-lg border border-ink/15 bg-paper hover:bg-lavender-light text-ink/75 font-medium text-xs transition duration-150"
+                        >
+                            <svg className="w-4 h-4 mr-2" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M12.24 10.285V14.4h6.887c-.648 2.41-2.519 4.114-5.136 4.114-3.41 0-6.19-2.78-6.19-6.19s2.78-6.19 6.19-6.19c1.7 0 3.24.69 4.36 1.81l3.05-3.05C19.34 2.87 15.98 1.5 12.24 1.5c-5.79 0-10.5 4.71-10.5 10.5s4.71 10.5 10.5 10.5c5.79 0 10.5-4.71 10.5-10.5 0-.74-.08-1.46-.22-2.165H12.24z"/>
+                            </svg>
+                            <span>Google</span>
+                        </button>
+
+                        <button
+                            type="button"
+                            onClick={() => handleOAuthRedirect('github')}
+                            className="flex items-center justify-center py-2.5 px-4 rounded-lg border border-ink/15 bg-paper hover:bg-lavender-light text-ink/75 font-medium text-xs transition duration-150"
+                        >
+                            <svg className="w-4 h-4 mr-2" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/>
+                            </svg>
+                            <span>GitHub</span>
+                        </button>
+                    </div>
+
+                    {/* Navigation Link */}
+                    <div className="mt-8 text-center text-xs text-ink/50">
+                        Don't have an account?{' '}
+                        <Link to="/register" className="text-indigo-primary hover:underline font-semibold transition duration-150">
+                            Sign Up
+                        </Link>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
 }
