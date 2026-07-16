@@ -60,3 +60,36 @@ class ConversationDetailSchema(BaseModel):
     messages: List[MessageSchema] = []
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class SendMessageRequestSchema(BaseModel):
+    """
+    Request schema for sending a message in a conversation.
+    """
+    message: str
+
+
+class SourceSchema(BaseModel):
+    """
+    Schema representing a cited source chunk.
+    """
+    file_id: UUID
+    filename: str
+    page_number: Optional[int] = None
+    snippet: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class MessageResponseSchema(BaseModel):
+    """
+    Response schema representing a saved conversation message.
+    """
+    id: UUID
+    conversation_id: UUID
+    role: MessageRole
+    content: str
+    sources: Optional[List[SourceSchema]] = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)

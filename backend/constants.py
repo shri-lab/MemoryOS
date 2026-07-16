@@ -10,6 +10,7 @@ SIMILARITY_THRESHOLD: float = 0.20
 MAX_UPLOAD_MB: int = 20
 JWT_EXPIRE_MINUTES: int = 60
 MAX_SUMMARY_INPUT_CHARS: int = 12000
+MAX_HISTORY_MESSAGES: int = 5
 
 class SourceType(str, Enum):
     PDF = "pdf"
@@ -30,6 +31,7 @@ class GeminiTask(str, Enum):
     QA = "qa"
     TOPIC_EXTRACT = "topic_extraction"
     TAG_GENERATE = "tag_generation"
+    REFORMULATE = "reformulate"
 
 
 class OAuthProvider(str, Enum):

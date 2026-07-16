@@ -13,6 +13,7 @@ from groq import GroqError
 
 from config import get_settings
 from constants import LLMModel, MAX_SUMMARY_INPUT_CHARS, GeminiTask
+from models import Message
 
 logger = logging.getLogger(__name__)
 
@@ -223,6 +224,89 @@ async def answer_question(question: str, context_chunks: list[dict]) -> str:
         "Answer the user's question STRICTLY using the information from the sources provided below. "
         "If the answer cannot be found or inferred directly from these sources, your response "
         "MUST be exactly: 'I don't have enough information in your documents to answer that.'\n"
+        "Do not use outside knowledge or hallucinate information that is not in the sources.\n\n"
+        "Sources:\n"
+        f"{sources_text.strip()}\n\n"
+        f"Question: {question.strip()}\n"
+        "Answer:"
+    )
+    
+    return await _call_llm_with_fallback(prompt, GeminiTask.QA)
+
+
+async def reformulate_query(conversation_history: list[Message], new_message: str) -> str:
+    """
+    Takes the prior conversation messages (up to MAX_HISTORY_MESSAGES turns)
+    and the new user message, and asks the LLM to rewrite the new message into
+    a standalone, self-contained search query.
+    
+    Args:
+        conversation_history: List of prior Message models in the conversation.
+        new_message: The new incoming message text from the user.
+        
+    Returns:
+        The standalone query string.
+    """
+    if not conversation_history:
+        return new_message
+        
+    history_text = ""
+    for msg in conversation_history:
+        role_str = msg.role.value if hasattr(msg.role, 'value') else str(msg.role)
+        history_text += f"{role_str.capitalize()}: {msg.content}\n"
+        
+    prompt = (
+        "You are an expert search query reformulation assistant.\n"
+        "Given the conversation history and a new user message, rewrite the new user message into a standalone, self-contained search query. "
+        "The standalone query must resolve any references, pronouns, or context from the previous conversation turns (e.g. resolving 'what about page 3?' or 'explain it' based on the history).\n"
+        "Maintain the user's search intent. If the new user message is already self-contained and does not need any context from the history, return it exactly as-is.\n"
+        "Your response MUST contain ONLY the reformulated query text. Do not add any introductory phrases, explanations, markdown formatting, or citations.\n\n"
+        f"Conversation History:\n{history_text.strip()}\n\n"
+        f"New Message: {new_message.strip()}\n"
+        "Reformulated Query:"
+    )
+    
+    response = await _call_llm_with_fallback(prompt, GeminiTask.REFORMULATE)
+    
+    # Strip any accidental wrapping quotes or markdown backticks
+    clean_response = response.strip()
+    if clean_response.startswith('```') and clean_response.endswith('```'):
+        # strip markdown code blocks
+        lines = clean_response.splitlines()
+        if len(lines) >= 3:
+            clean_response = "\n".join(lines[1:-1]).strip()
+    return clean_response
+
+
+async def answer_conversation_qa(question: str, context_chunks: list[dict]) -> str:
+    """
+    Answers a question strictly grounded in the provided document context chunks for a conversation.
+    
+    Args:
+        question: The reformulated question.
+        context_chunks: List of context chunks.
+        
+    Returns:
+        The grounded answer string, or 'not found in your documents' if not answerable.
+    """
+    if not question or not question.strip():
+        return ""
+    if not context_chunks:
+        return "not found in your documents"
+        
+    sources_text = ""
+    for i, chunk in enumerate(context_chunks):
+        filename = chunk.get("filename", "Unknown File")
+        page = chunk.get("page_number")
+        page_lbl = f"page {page}" if page is not None else "page unknown"
+        content = chunk.get("content", "").strip()
+        sources_text += f"\n[Source {i+1}: {filename}, {page_lbl}]:\n{content}\n"
+        
+    prompt = (
+        "You are an expert document-grounded question-answering assistant.\n"
+        "Answer the user's question STRICTLY using the information from the sources provided below. "
+        "If the answer cannot be found or inferred directly from these sources, your response "
+        "MUST be exactly: 'not found in your documents'\n"
         "Do not use outside knowledge or hallucinate information that is not in the sources.\n\n"
         "Sources:\n"
         f"{sources_text.strip()}\n\n"
