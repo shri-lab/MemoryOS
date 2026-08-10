@@ -1,19 +1,17 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { Link } from 'react-router-dom';
 import { 
     UploadCloud, 
     Trash2, 
-    Eye, 
     RefreshCw, 
-    FileText, 
-    X, 
+    Image as ImageIcon, 
     Loader2, 
     AlertCircle,
     CheckCircle,
+    Copy,
+    Check,
     Download
 } from 'lucide-react';
 import api from '../services/api';
-import { useAuthStore } from '../store/authStore';
 
 interface FileItem {
     id: string;
@@ -29,17 +27,25 @@ interface FileDetail {
     source_type: string;
     status: string;
     summary: string | null;
-    tags?: string[];
+    tags: string[];
+    extracted_text: string | null;
     created_at: string;
 }
 
-const MAX_UPLOAD_SIZE = 20 * 1024 * 1024; // 20 MB
+const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 10 MB limit
+const ALLOWED_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp', '.bmp'];
+const MAX_POLL_ATTEMPTS = 20;
 
-export default function PdfLibrary() {
+export default function ImageLibrary() {
     const [files, setFiles] = useState<FileItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [statusFilter, setStatusFilter] = useState<'all' | 'ready' | 'processing' | 'failed'>('all');
+
+    // Blob object URLs: fileId -> blobUrl
+    const [imageUrls, setImageUrls] = useState<Record<string, string>>({});
+    const [pollCounts, setPollCounts] = useState<Record<string, number>>({});
+    const [stuckFiles, setStuckFiles] = useState<Record<string, boolean>>({});
 
     // Upload states
     const [dragActive, setDragActive] = useState(false);
@@ -48,27 +54,26 @@ export default function PdfLibrary() {
     const [uploadSuccess, setUploadSuccess] = useState<string | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
-    // Detail Panel state
+    // Detail Panel Preview state
     const [previewFileId, setPreviewFileId] = useState<string | null>(null);
     const [previewFile, setPreviewFile] = useState<FileDetail | null>(null);
-    const [contentUrl, setContentUrl] = useState<string | null>(null);
     const [previewLoading, setPreviewLoading] = useState(false);
     const [previewError, setPreviewError] = useState<string | null>(null);
-    const [summarizing, setSummarizing] = useState(false);
-    const [topics, setTopics] = useState<string[]>([]);
+    const [copiedText, setCopiedText] = useState(false);
 
     // Delete state
     const [fileToDelete, setFileToDelete] = useState<FileItem | null>(null);
 
+    // Fetch images list
     const fetchFiles = async (silent = false) => {
         if (!silent) setLoading(true);
         setError('');
         try {
-            const res = await api.get<FileItem[]>('/files');
+            const res = await api.get<FileItem[]>('/files?source_type=screenshot');
             setFiles(res.data);
         } catch (err: any) {
-            console.error('Failed to load files:', err);
-            setError('Failed to retrieve document index.');
+            console.error('Failed to load image library:', err);
+            setError('Failed to retrieve image library.');
         } finally {
             if (!silent) setLoading(false);
         }
@@ -82,75 +87,88 @@ export default function PdfLibrary() {
     // Set first file as default preview selection
     useEffect(() => {
         if (files.length > 0 && !previewFileId) {
-            setPreviewFileId(files[0].id);
+            fetchPreviewDetail(files[0].id);
         }
     }, [files]);
 
-    // Fetch details & content blob when selected file ID changes
-    useEffect(() => {
-        let activeUrl: string | null = null;
-        let isMounted = true;
-
-        if (!previewFileId) {
-            setPreviewFile(null);
-            setContentUrl(null);
-            return;
+    // Load Image Blob using authenticated Axios
+    const loadImageBlob = async (fileId: string) => {
+        if (imageUrls[fileId]) return;
+        try {
+            const res = await api.get(`/files/${fileId}/content`, { responseType: 'blob' });
+            const objectUrl = URL.createObjectURL(res.data);
+            setImageUrls(prev => ({ ...prev, [fileId]: objectUrl }));
+        } catch (err) {
+            console.error(`Failed to load image content blob for file ${fileId}`, err);
         }
+    };
 
-        const loadDetailsAndBlob = async () => {
-            setPreviewLoading(true);
-            setPreviewError(null);
-            setTopics([]);
-            try {
-                // 1. Fetch metadata detail
-                const detailRes = await api.get<FileDetail>(`/files/${previewFileId}`);
-                if (!isMounted) return;
-                setPreviewFile(detailRes.data);
-                if (detailRes.data.tags) {
-                    setTopics(detailRes.data.tags);
-                }
-
-                // 2. Fetch raw content blob
-                const contentRes = await api.get(`/files/${previewFileId}/content`, { responseType: 'blob' });
-                if (!isMounted) return;
-                const blobUrl = URL.createObjectURL(contentRes.data);
-                activeUrl = blobUrl;
-                setContentUrl(blobUrl);
-            } catch (err: any) {
-                console.error(`Failed loading preview for file ${previewFileId}:`, err);
-                if (isMounted) {
-                    setPreviewError('Failed to load file details or raw preview.');
-                }
-            } finally {
-                if (isMounted) setPreviewLoading(false);
-            }
-        };
-
-        loadDetailsAndBlob();
-
-        return () => {
-            isMounted = false;
-            if (activeUrl) {
-                URL.revokeObjectURL(activeUrl);
-            }
-        };
-    }, [previewFileId]);
-
-    // Polling logic for uploading/processing files
+    // Load blobs for ready files
     useEffect(() => {
-        const transitioningFileIds = files
-            .filter(f => f.status === 'processing' || f.status === 'uploading')
+        files.forEach(f => {
+            if (f.status === 'ready' && !imageUrls[f.id]) {
+                loadImageBlob(f.id);
+            }
+        });
+    }, [files]);
+
+    // Clean up created object URLs on unmount
+    useEffect(() => {
+        return () => {
+            Object.values(imageUrls).forEach(url => URL.revokeObjectURL(url));
+        };
+    }, [imageUrls]);
+
+    // Fetch details
+    const fetchPreviewDetail = async (id: string) => {
+        setPreviewFileId(id);
+        setPreviewLoading(true);
+        setPreviewError(null);
+        setCopiedText(false);
+        try {
+            const res = await api.get<FileDetail>(`/files/${id}`);
+            setPreviewFile(res.data);
+            loadImageBlob(id);
+        } catch (err: any) {
+            console.error('Failed to get image details:', err);
+            setPreviewError('Failed to retrieve image details.');
+        } finally {
+            setPreviewLoading(false);
+        }
+    };
+
+    // Polling logic for uploading/processing images
+    useEffect(() => {
+        const activeFileIds = files
+            .filter(f => (f.status === 'processing' || f.status === 'uploading') && !stuckFiles[f.id])
             .map(f => f.id);
 
-        if (transitioningFileIds.length === 0) return;
+        if (activeFileIds.length === 0) return;
 
         const interval = setInterval(async () => {
-            const promises = transitioningFileIds.map(async (id) => {
+            const nextCounts = { ...pollCounts };
+            const idsToPoll: string[] = [];
+
+            activeFileIds.forEach(id => {
+                const currentCount = (nextCounts[id] || 0) + 1;
+                nextCounts[id] = currentCount;
+
+                if (currentCount >= MAX_POLL_ATTEMPTS) {
+                    setStuckFiles(prev => ({ ...prev, [id]: true }));
+                } else {
+                    idsToPoll.push(id);
+                }
+            });
+
+            setPollCounts(nextCounts);
+            if (idsToPoll.length === 0) return;
+
+            const promises = idsToPoll.map(async (id) => {
                 try {
                     const res = await api.get<FileItem>(`/files/${id}`);
                     return res.data;
                 } catch (err) {
-                    console.error(`Failed to poll status for file ${id}`, err);
+                    console.error(`Failed polling status for file ${id}`, err);
                     return null;
                 }
             });
@@ -164,8 +182,7 @@ export default function PdfLibrary() {
                     if (match && match.status !== file.status) {
                         updated = true;
                         if (previewFileId === file.id) {
-                            // Reload details if active
-                            api.get<FileDetail>(`/files/${file.id}`).then(res => setPreviewFile(res.data)).catch(()=>{});
+                            fetchPreviewDetail(file.id);
                         }
                         return { ...file, status: match.status };
                     }
@@ -176,9 +193,9 @@ export default function PdfLibrary() {
         }, 3000);
 
         return () => clearInterval(interval);
-    }, [files, previewFileId]);
+    }, [files, previewFileId, pollCounts, stuckFiles]);
 
-    // File Drag & Drop Handlers
+    // Drag and drop handlers
     const handleDrag = (e: React.DragEvent) => {
         e.preventDefault();
         e.stopPropagation();
@@ -193,13 +210,16 @@ export default function PdfLibrary() {
         setUploadError(null);
         setUploadSuccess(null);
 
-        if (!file.name.toLowerCase().endsWith('.pdf')) {
-            setUploadError('Only PDF files are allowed.');
+        const lowerName = file.name.toLowerCase();
+        const isValidExt = ALLOWED_EXTENSIONS.some(ext => lowerName.endsWith(ext));
+
+        if (!isValidExt) {
+            setUploadError(`Invalid image format. Allowed: ${ALLOWED_EXTENSIONS.join(', ')}`);
             return;
         }
 
-        if (file.size > MAX_UPLOAD_SIZE) {
-            setUploadError('File size exceeds the 20MB limit.');
+        if (file.size > MAX_IMAGE_SIZE) {
+            setUploadError('Image file size exceeds the 10MB limit.');
             return;
         }
 
@@ -210,7 +230,6 @@ export default function PdfLibrary() {
         e.preventDefault();
         e.stopPropagation();
         setDragActive(false);
-
         if (e.dataTransfer.files && e.dataTransfer.files[0]) {
             validateAndUploadFile(e.dataTransfer.files[0]);
         }
@@ -222,17 +241,6 @@ export default function PdfLibrary() {
         }
     };
 
-    const triggerFileBrowser = () => {
-        fileInputRef.current?.click();
-    };
-
-    const handleUploadZoneKeyDown = (e: React.KeyboardEvent) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            triggerFileBrowser();
-        }
-    };
-
     const uploadFileToServer = async (file: File) => {
         setUploadProgress(0);
         const formData = new FormData();
@@ -240,9 +248,7 @@ export default function PdfLibrary() {
 
         try {
             const res = await api.post<FileItem>('/files/upload', formData, {
-                headers: {
-                    'Content-Type': 'multipart/form-data'
-                },
+                headers: { 'Content-Type': 'multipart/form-data' },
                 onUploadProgress: (progressEvent) => {
                     const percentCompleted = Math.round(
                         (progressEvent.loaded * 100) / (progressEvent.total || file.size)
@@ -253,33 +259,21 @@ export default function PdfLibrary() {
 
             setUploadSuccess(`Successfully uploaded "${file.name}"`);
             setFiles(prev => [res.data, ...prev]);
-            setPreviewFileId(res.data.id);
+            fetchPreviewDetail(res.data.id);
         } catch (err: any) {
-            console.error('Upload failed:', err);
-            setUploadError(err.response?.data?.detail || 'Failed to upload document.');
+            console.error('Image upload failed:', err);
+            setUploadError(err.response?.data?.detail || 'Failed to upload image.');
         } finally {
             setUploadProgress(null);
         }
     };
 
-    // Manual summarization
-    const handleGenerateSummary = async (fileId: string) => {
-        if (summarizing) return;
-        setSummarizing(true);
-        try {
-            const res = await api.post<{ summary: string; topics: string[] }>(`/files/${fileId}/summarize`);
-            setPreviewFile(prev => prev ? { ...prev, summary: res.data.summary } : null);
-            setTopics(res.data.topics);
-            setFiles(prev => prev.map(f => f.id === fileId ? { ...f, status: 'ready' } : f));
-        } catch (err: any) {
-            console.error('Failed to summarize file:', err);
-            alert(err.response?.data?.detail || 'Failed to generate summary.');
-        } finally {
-            setSummarizing(false);
-        }
+    const handleCopyText = (textToCopy: string) => {
+        navigator.clipboard.writeText(textToCopy);
+        setCopiedText(true);
+        setTimeout(() => setCopiedText(false), 2000);
     };
 
-    // Delete actions
     const handleDeleteConfirm = async () => {
         if (!fileToDelete) return;
         try {
@@ -291,6 +285,14 @@ export default function PdfLibrary() {
                 return;
             }
         } finally {
+            if (imageUrls[fileToDelete.id]) {
+                URL.revokeObjectURL(imageUrls[fileToDelete.id]);
+                setImageUrls(prev => {
+                    const copy = { ...prev };
+                    delete copy[fileToDelete.id];
+                    return copy;
+                });
+            }
             setFiles(prev => prev.filter(f => f.id !== fileToDelete.id));
             if (previewFileId === fileToDelete.id) {
                 setPreviewFileId(null);
@@ -299,7 +301,7 @@ export default function PdfLibrary() {
         }
     };
 
-    // Escape listener for dialog close
+    // Escape listener
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
             if (e.key === 'Escape') {
@@ -316,21 +318,29 @@ export default function PdfLibrary() {
         return file.status === statusFilter;
     });
 
-    const formatStatusBadge = (status: string) => {
+    const formatStatusBadge = (file: FileItem) => {
+        const isStuck = stuckFiles[file.id];
         let dotColor = 'bg-primary animate-pulse';
         let textColor = 'text-primary';
-        if (status === 'ready') {
+        let label = file.status;
+
+        if (file.status === 'ready') {
             dotColor = 'bg-success shadow-cyan-glow';
             textColor = 'text-success';
-        } else if (status === 'failed') {
+        } else if (file.status === 'failed') {
             dotColor = 'bg-warning shadow-violet-glow';
             textColor = 'text-warning';
+        } else if (isStuck) {
+            dotColor = 'bg-warning shadow-violet-glow';
+            textColor = 'text-warning';
+            label = 'stuck';
         }
+
         return (
-            <div className="flex items-center space-x-1.5 bg-glass/40 border border-glass-border px-2 py-0.5 rounded-full shadow-sm">
+            <div className="flex items-center space-x-1 bg-glass/40 border border-glass-border px-2 py-0.5 rounded-full shadow-sm">
                 <span className={`w-1 h-1 rounded-full ${dotColor}`} />
-                <span className={`font-mono text-[8px] uppercase tracking-widest font-bold ${textColor}`}>
-                    {status}
+                <span className={`font-mono text-[8px] uppercase tracking-widest font-bold ${textColor} truncate max-w-[100px]`}>
+                    {label}
                 </span>
             </div>
         );
@@ -352,17 +362,17 @@ export default function PdfLibrary() {
     return (
         <div className="w-full flex flex-col relative glow-bg min-h-screen overflow-hidden">
 
-            {/* Main Content Area: Master-Detail Layout */}
+            {/* Main Workspace: Master-Detail Layout */}
             <main className="w-full mx-auto px-6 py-8 flex-grow relative z-10 flex flex-col h-full">
                 
                 {/* Header */}
                 <div className="flex items-center justify-between mb-6 relative z-10">
                     <div>
                         <h1 className="font-display text-2xl font-extrabold text-ink tracking-tight">
-                            PDF Library
+                            Image Library
                         </h1>
                         <p className="text-xs text-muted">
-                            Upload, index, and manage your text memories in a master-detail split workspace.
+                            Upload photos, screenshots, and visual notes for automated OCR extraction.
                         </p>
                     </div>
                     <button
@@ -386,8 +396,8 @@ export default function PdfLibrary() {
                                 onDragLeave={handleDrag}
                                 onDragOver={handleDrag}
                                 onDrop={handleDrop}
-                                onClick={triggerFileBrowser}
-                                onKeyDown={handleUploadZoneKeyDown}
+                                onClick={() => fileInputRef.current?.click()}
+                                onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && fileInputRef.current?.click()}
                                 tabIndex={0}
                                 className={`border border-dashed rounded-xl p-5 flex flex-col items-center justify-center cursor-pointer transition-all duration-150 focus:outline-none focus:ring-1 focus:ring-secondary/40 ${
                                     dragActive 
@@ -399,15 +409,15 @@ export default function PdfLibrary() {
                                     type="file"
                                     ref={fileInputRef}
                                     onChange={handleFileInputChange}
-                                    accept=".pdf"
+                                    accept=".png,.jpg,.jpeg,.webp,.bmp"
                                     className="hidden"
                                 />
                                 <UploadCloud className="w-7 h-7 text-secondary/70 mb-2 shadow-cyan-glow" />
                                 <p className="text-xs font-bold text-ink text-center">
-                                    Drop PDF here or <span className="underline text-secondary">browse</span>
+                                    Drop screenshot or <span className="underline text-secondary">browse</span>
                                 </p>
                                 <p className="text-[8px] text-muted mt-0.5 font-mono uppercase tracking-wider">
-                                    Max size: 20MB
+                                    Max size: 10MB
                                 </p>
                             </div>
 
@@ -460,7 +470,7 @@ export default function PdfLibrary() {
                         </div>
 
                         {/* Master File list */}
-                        <div className="flex-1 min-h-[300px] overflow-y-auto max-h-[50vh] lg:max-h-[60vh] pr-1">
+                        <div className="flex-1 min-h-[300px] overflow-y-auto max-h-[55vh] lg:max-h-[60vh] pr-1">
                             {loading ? (
                                 <div className="glass-panel rounded-2xl p-4 divide-y divide-glass-border space-y-3">
                                     {[1, 2, 3].map((n) => (
@@ -486,7 +496,7 @@ export default function PdfLibrary() {
                                     {filteredFiles.map((file) => (
                                         <div
                                             key={file.id}
-                                            onClick={() => setPreviewFileId(file.id)}
+                                            onClick={() => fetchPreviewDetail(file.id)}
                                             className={`p-3 rounded-xl border transition-all text-left cursor-pointer flex items-center justify-between ${
                                                 previewFileId === file.id
                                                     ? "bg-secondary/10 border-secondary shadow-cyan-glow"
@@ -502,14 +512,14 @@ export default function PdfLibrary() {
                                                 </span>
                                             </div>
                                             <div className="flex items-center space-x-2 shrink-0">
-                                                {formatStatusBadge(file.status)}
+                                                {formatStatusBadge(file)}
                                                 <button
                                                     onClick={(e) => {
                                                         e.stopPropagation();
                                                         setFileToDelete(file);
                                                     }}
                                                     className="p-1 hover:bg-danger/15 rounded text-muted hover:text-danger"
-                                                    title="Delete document"
+                                                    title="Delete screenshot"
                                                 >
                                                     <Trash2 className="w-3.5 h-3.5" />
                                                 </button>
@@ -527,7 +537,7 @@ export default function PdfLibrary() {
                             {previewLoading ? (
                                 <div className="flex-1 flex flex-col items-center justify-center space-y-3">
                                     <Loader2 className="w-7 h-7 animate-spin text-secondary" />
-                                    <p className="text-xs text-muted font-mono">Retrieving index content...</p>
+                                    <p className="text-xs text-muted font-mono">Retrieving index details...</p>
                                 </div>
                             ) : previewError ? (
                                 <div className="flex-1 flex flex-col items-center justify-center space-y-2 text-danger p-6 text-center">
@@ -544,71 +554,82 @@ export default function PdfLibrary() {
                                                 {previewFile.filename}
                                             </h3>
                                             <p className="font-mono text-[9px] text-muted mt-0.5 uppercase">
-                                                PDF Document · ID: {previewFile.id.slice(0, 10)}...
+                                                Screenshot Image · ID: {previewFile.id.slice(0, 10)}...
                                             </p>
                                         </div>
                                         <div className="flex items-center space-x-2 shrink-0">
-                                            {contentUrl && (
+                                            {imageUrls[previewFile.id] && (
                                                 <a
-                                                    href={contentUrl}
+                                                    href={imageUrls[previewFile.id]}
                                                     download={previewFile.filename}
                                                     className="p-2 border border-glass-border hover:border-secondary bg-glass/30 hover:bg-secondary/15 text-muted hover:text-secondary rounded-full transition"
-                                                    title="Download file"
+                                                    title="Download Image"
                                                 >
                                                     <Download className="w-3.5 h-3.5" />
                                                 </a>
                                             )}
-                                            {!previewFile.summary && (
-                                                <button
-                                                    onClick={() => handleGenerateSummary(previewFile.id)}
-                                                    disabled={summarizing}
-                                                    className="px-3 py-1.5 border border-secondary text-secondary hover:bg-secondary/10 disabled:opacity-50 text-[10px] font-mono font-bold rounded-full transition"
-                                                >
-                                                    {summarizing ? 'SUMMARIZING...' : 'GENERATE SUMMARY'}
-                                                </button>
-                                            )}
                                         </div>
                                     </div>
 
-                                    {/* Split view: PDF Preview left, Summary/Metadata right */}
+                                    {/* Split view: Image Preview left, OCR Text right */}
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 flex-grow items-stretch mb-4 min-h-[300px]">
                                         
-                                        {/* Embedded PDF iframe */}
-                                        <div className="bg-obsidian/60 border border-glass-border rounded-xl p-2 flex flex-col items-center justify-center overflow-hidden min-h-[300px]">
-                                            {contentUrl ? (
-                                                <iframe 
-                                                    src={`${contentUrl}#page=1`}
-                                                    title={previewFile.filename}
-                                                    className="w-full h-full min-h-[280px] rounded-lg border border-glass-border bg-white"
+                                        {/* Image Display */}
+                                        <div className="bg-obsidian/60 border border-glass-border rounded-xl p-2 flex items-center justify-center overflow-hidden min-h-[300px] max-h-[420px]">
+                                            {imageUrls[previewFile.id] ? (
+                                                <img 
+                                                    src={imageUrls[previewFile.id]}
+                                                    alt={previewFile.filename}
+                                                    className="max-w-full max-h-full object-contain rounded-lg shadow-sm"
                                                 />
                                             ) : (
-                                                <span className="text-[10px] text-muted italic">Content preview loading...</span>
+                                                <span className="text-[10px] text-muted italic">Image loading...</span>
                                             )}
                                         </div>
 
-                                        {/* Metadata details, Summary, and Topics */}
+                                        {/* Metadata, OCR Text */}
                                         <div className="space-y-4 flex flex-col justify-between">
                                             <div className="space-y-4">
-                                                {/* Summary card */}
+                                                {/* OCR Extracted Text */}
                                                 <div>
-                                                    <span className="font-mono text-[8px] uppercase tracking-widest text-muted block mb-1">
-                                                        AI Generated Summary
-                                                    </span>
-                                                    <div className="text-xs text-ink bg-obsidian/45 border border-glass-border p-3 rounded-xl min-h-[100px] max-h-[180px] overflow-y-auto leading-relaxed">
-                                                        {previewFile.summary || (
-                                                            <span className="text-muted italic">No summary available yet. Click "Generate Summary" above to index with AI.</span>
+                                                    <div className="flex items-center justify-between mb-1">
+                                                        <span className="font-mono text-[8px] uppercase tracking-widest text-muted">
+                                                            OCR Extracted Text
+                                                        </span>
+                                                        {previewFile.extracted_text && (
+                                                            <button
+                                                                onClick={() => handleCopyText(previewFile.extracted_text || '')}
+                                                                className="flex items-center space-x-1 text-[9px] text-secondary hover:underline font-mono"
+                                                            >
+                                                                {copiedText ? (
+                                                                    <>
+                                                                        <Check className="w-3 h-3" />
+                                                                        <span>COPIED</span>
+                                                                    </>
+                                                                ) : (
+                                                                    <>
+                                                                        <Copy className="w-3 h-3" />
+                                                                        <span>COPY</span>
+                                                                    </>
+                                                                )}
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                    <div className="text-xs font-mono text-ink bg-obsidian/45 border border-glass-border p-3 rounded-xl min-h-[140px] max-h-[220px] overflow-y-auto leading-relaxed whitespace-pre-wrap">
+                                                        {previewFile.extracted_text || (
+                                                            <span className="text-muted italic">No extracted OCR text found. Check if the image status is fully ready.</span>
                                                         )}
                                                     </div>
                                                 </div>
 
-                                                {/* Topic tags */}
-                                                {topics.length > 0 && (
+                                                {/* Tags */}
+                                                {previewFile.tags && previewFile.tags.length > 0 && (
                                                     <div>
                                                         <span className="font-mono text-[8px] uppercase tracking-widest text-muted block mb-1">
-                                                            Classified Topics
+                                                            Classified Tags
                                                         </span>
                                                         <div className="flex flex-wrap gap-1">
-                                                            {topics.map((tag, i) => (
+                                                            {previewFile.tags.map((tag, i) => (
                                                                 <span key={i} className="px-2 py-0.5 rounded border border-secondary/25 bg-secondary/5 text-secondary text-[9px] font-mono">
                                                                     {tag}
                                                                 </span>
@@ -628,10 +649,10 @@ export default function PdfLibrary() {
                                 </div>
                             ) : (
                                 <div className="flex-grow flex flex-col items-center justify-center text-center p-6 space-y-2">
-                                    <FileText className="w-10 h-10 text-muted/40" />
+                                    <ImageIcon className="w-10 h-10 text-muted/40" />
                                     <h4 className="text-sm font-bold text-ink">Inspect Records</h4>
                                     <p className="text-xs text-muted max-w-xs leading-relaxed">
-                                        Select any PDF document from the index on the left to view its metadata, AI summary, and visual pages.
+                                        Select any screenshot from the index on the left to view its OCR text content, tags, and visuals.
                                     </p>
                                 </div>
                             )}
@@ -656,10 +677,10 @@ export default function PdfLibrary() {
                             </div>
                             <div>
                                 <h3 className="font-display text-lg font-bold text-ink">
-                                    Delete Document?
+                                    Delete Image?
                                 </h3>
                                 <p className="text-xs text-muted mt-1 leading-relaxed">
-                                    Are you sure you want to permanently delete <strong className="text-ink">"{fileToDelete.filename}"</strong>? This will clear all extracted summaries and vector chunks.
+                                    Are you sure you want to permanently delete <strong className="text-ink">"{fileToDelete.filename}"</strong>? This will clear all parsed OCR texts and vector indices.
                                 </p>
                             </div>
                         </div>

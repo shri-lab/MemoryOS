@@ -257,10 +257,13 @@ async def reformulate_query(conversation_history: list[Message], new_message: st
         
     prompt = (
         "You are an expert search query reformulation assistant.\n"
-        "Given the conversation history and a new user message, rewrite the new user message into a standalone, self-contained search query. "
-        "The standalone query must resolve any references, pronouns, or context from the previous conversation turns (e.g. resolving 'what about page 3?' or 'explain it' based on the history).\n"
-        "Maintain the user's search intent. If the new user message is already self-contained and does not need any context from the history, return it exactly as-is.\n"
-        "Your response MUST contain ONLY the reformulated query text. Do not add any introductory phrases, explanations, markdown formatting, or citations.\n\n"
+        "Given the conversation history and a new user message, rewrite the new user message into a standalone, self-contained search query.\n\n"
+        "Rules:\n"
+        "1. Only reformulate the message if it depends on prior context (e.g. contains pronouns like 'it', 'its', 'they', 'this', 'that', or implicit references like 'what about page 3?', 'explain more').\n"
+        "2. If the user introduces a new topic (e.g. asking about 'resume', 'projects', 'itinerary', or other documents) that does not reference the previous topics, do NOT append or force the history topic (e.g. neural networks) onto it. Keep it focused on the new topic.\n"
+        "3. If the user says 'resume', they mean their professional CV/resume document. Do not rewrite it as the verb 'to continue' or 'define resume'. Keep it as a search for 'resume' or 'user resume'.\n"
+        "4. If the new user message is already self-contained and standalone, return it exactly as-is.\n"
+        "5. Your response must contain ONLY the plain query text. Do not include quotes, explanations, intro/outro, or markdown.\n\n"
         f"Conversation History:\n{history_text.strip()}\n\n"
         f"New Message: {new_message.strip()}\n"
         "Reformulated Query:"
@@ -278,13 +281,15 @@ async def reformulate_query(conversation_history: list[Message], new_message: st
     return clean_response
 
 
-async def answer_conversation_qa(question: str, context_chunks: list[dict]) -> str:
+async def answer_conversation_qa(question: str, context_chunks: list[dict], is_explain_mode: bool = False) -> str:
     """
     Answers a question strictly grounded in the provided document context chunks for a conversation.
+    Supports explain-mode for detailed responses if requested.
     
     Args:
         question: The reformulated question.
         context_chunks: List of context chunks.
+        is_explain_mode: If True, instructs the LLM to output a more detailed, multi-sentence response.
         
     Returns:
         The grounded answer string, or 'not found in your documents' if not answerable.
@@ -302,16 +307,94 @@ async def answer_conversation_qa(question: str, context_chunks: list[dict]) -> s
         content = chunk.get("content", "").strip()
         sources_text += f"\n[Source {i+1}: {filename}, {page_lbl}]:\n{content}\n"
         
+    if is_explain_mode:
+        instruction = (
+            "You are an expert document-grounded question-answering assistant.\n"
+            "Provide a thorough, detailed, and comprehensive multi-sentence explanation answering the user's question, "
+            "grounding your explanation STRICTLY in the sources provided below. "
+            "Do not use outside knowledge or assume/extrapolate beyond what is directly supported by the sources. "
+            "If the sources do not contain any information related to the question at all, "
+            "your response MUST be exactly: 'not found in your documents'"
+        )
+    else:
+        instruction = (
+            "You are an expert document-grounded question-answering assistant.\n"
+            "Provide a concise, direct, and terse answer to the user's question, "
+            "grounding your response STRICTLY in the sources provided below. "
+            "Do not use outside knowledge, extrapolate, or assume beyond what is directly supported by the sources. "
+            "If the sources do not contain any information related to the question at all, "
+            "your response MUST be exactly: 'not found in your documents'"
+        )
+
     prompt = (
-        "You are an expert document-grounded question-answering assistant.\n"
-        "Answer the user's question STRICTLY using the information from the sources provided below. "
-        "If the answer cannot be found or inferred directly from these sources, your response "
-        "MUST be exactly: 'not found in your documents'\n"
-        "Do not use outside knowledge or hallucinate information that is not in the sources.\n\n"
+        f"{instruction}\n\n"
         "Sources:\n"
         f"{sources_text.strip()}\n\n"
         f"Question: {question.strip()}\n"
         "Answer:"
     )
     
+    logger.info(f"Final QA Prompt sent to LLM (Explain Mode: {is_explain_mode}):\n{prompt}")
     return await _call_llm_with_fallback(prompt, GeminiTask.QA)
+
+
+async def answer_general_knowledge(question: str, conversation_history: list[Message]) -> str:
+    """
+    Answers a question using the LLM's own general knowledge (without retrieved document context).
+    Incorporates the conversation history for continuity.
+    
+    Args:
+        question: The reformulated question or raw user question.
+        conversation_history: List of prior Message models.
+        
+    Returns:
+        The general knowledge answer string.
+    """
+    if not question or not question.strip():
+        return ""
+        
+    history_text = ""
+    for msg in conversation_history:
+        role_str = msg.role.value if hasattr(msg.role, 'value') else str(msg.role)
+        history_text += f"{role_str.capitalize()}: {msg.content}\n"
+        
+    instruction = (
+        "You are a helpful AI assistant.\n"
+        "The user has asked a question that cannot be answered using the uploaded documents. "
+        "Therefore, you should answer the question using your own general knowledge. "
+        "Keep the conversation history in mind to maintain continuity.\n"
+        "Your response should be direct, helpful, and natural. "
+        "Do not mention documents, files, sources, context, page numbers, or the fact that no document context was provided, "
+        "unless directly asked. Do not output any citation tags or reference files."
+    )
+    
+    prompt = (
+        f"{instruction}\n\n"
+        f"Conversation History:\n{history_text.strip()}\n\n"
+        f"Question: {question.strip()}\n"
+        "Answer:"
+    )
+    
+    logger.info(f"Final General Knowledge QA Prompt sent to LLM:\n{prompt}")
+    return await _call_llm_with_fallback(prompt, GeminiTask.QA)
+
+
+async def generate_conversation_title(first_message: str) -> str:
+    """
+    Generates a short, descriptive title (4-6 words) based on the user's first message.
+    """
+    prompt = (
+        "You are a helpful assistant. Generate a short, descriptive title (4 to 6 words maximum) for a conversation "
+        "that starts with the following message. Respond with ONLY the title. Do not include quotes, prefix text, or punctuation.\n\n"
+        f"Message: {first_message}\n"
+        "Title:"
+    )
+    title = await _call_llm_with_fallback(prompt, GeminiTask.SUMMARIZE)
+    # Clean up any quotes or extra whitespace the LLM might include
+    cleaned_title = title.strip().replace('"', '').replace("'", "")
+    # Ensure it's not too long
+    words = cleaned_title.split()
+    if len(words) > 8:
+        cleaned_title = " ".join(words[:6])
+    return cleaned_title
+

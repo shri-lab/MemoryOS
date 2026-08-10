@@ -36,6 +36,17 @@ class User(Base):
         server_default="local"
     )
     oauth_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    full_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    preferred_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    work_description: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    custom_instructions: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    theme_preference: Mapped[str] = mapped_column(String(10), default="system", server_default="system", nullable=False)
+    preferences: Mapped[dict] = mapped_column(
+        JSONB,
+        default=lambda: {"default_search_top_k": 5, "default_landing_page": "dashboard", "chat_auto_title_enabled": True},
+        server_default='{"default_search_top_k": 5, "default_landing_page": "dashboard", "chat_auto_title_enabled": true}',
+        nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), default=datetime.utcnow
     )
@@ -50,6 +61,9 @@ class User(Base):
         back_populates="user", cascade="all, delete-orphan"
     )
     conversations: Mapped[List["Conversation"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+    file_views: Mapped[List["FileView"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
 
@@ -97,6 +111,34 @@ class File(Base):
     user: Mapped["User"] = relationship(back_populates="files")
     chunks: Mapped[List["Chunk"]] = relationship(back_populates="file", cascade="all, delete-orphan")
     tags: Mapped[List["Tag"]] = relationship(secondary="file_tags", back_populates="files")
+    file_views: Mapped[List["FileView"]] = relationship(back_populates="file", cascade="all, delete-orphan")
+
+
+class FileView(Base):
+    """
+    FileView model representing a user's recent viewing history of a File.
+    Unique per (user_id, file_id) to update viewed_at on conflict rather than accumulating duplicates.
+    """
+    __tablename__ = "file_views"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    file_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("files.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    viewed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), default=datetime.utcnow
+    )
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "file_id", name="uq_file_view_user_file"),
+    )
+
+    # Relationships
+    user: Mapped["User"] = relationship(back_populates="file_views")
+    file: Mapped["File"] = relationship(back_populates="file_views")
 
 
 class Chunk(Base):
@@ -144,6 +186,9 @@ class SearchHistory(Base):
         ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     query: Mapped[str] = mapped_column(Text, nullable=False)
+    source: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default="search", default="search"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), default=datetime.utcnow
     )
@@ -163,6 +208,7 @@ class Conversation(Base):
         ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     title: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    is_pinned: Mapped[bool] = mapped_column(default=False, nullable=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), default=datetime.utcnow
     )
@@ -192,9 +238,24 @@ class Message(Base):
     )
     content: Mapped[str] = mapped_column(Text, nullable=False)
     sources: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    answer_mode: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), default=datetime.utcnow
     )
 
     # Relationships
     conversation: Mapped["Conversation"] = relationship(back_populates="messages")
+
+    @property
+    def referenced_files(self) -> List[str]:
+        if not self.sources:
+            return []
+        seen = set()
+        filenames = []
+        for src in self.sources:
+            if isinstance(src, dict) and "filename" in src:
+                fname = src["filename"]
+                if fname not in seen:
+                    seen.add(fname)
+                    filenames.append(fname)
+        return filenames

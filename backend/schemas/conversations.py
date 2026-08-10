@@ -10,6 +10,8 @@ from pydantic import BaseModel, ConfigDict
 from constants import MessageRole
 
 
+from typing import Optional, List, Any, Literal
+
 class MessageSchema(BaseModel):
     """
     Schema representing a single message turn in a conversation.
@@ -19,6 +21,8 @@ class MessageSchema(BaseModel):
     role: MessageRole
     content: str
     sources: Optional[List[Any]] = None
+    referenced_files: Optional[List[str]] = []
+    answer_mode: Optional[Literal["grounded", "general_knowledge"]] = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -31,6 +35,7 @@ class ConversationSchema(BaseModel):
     id: UUID
     user_id: UUID
     title: Optional[str] = None
+    is_pinned: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -43,6 +48,7 @@ class ConversationListItemSchema(BaseModel):
     """
     id: UUID
     title: Optional[str] = None
+    is_pinned: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -55,6 +61,7 @@ class ConversationDetailSchema(BaseModel):
     """
     id: UUID
     title: Optional[str] = None
+    is_pinned: bool = False
     created_at: datetime
     updated_at: datetime
     messages: List[MessageSchema] = []
@@ -66,7 +73,7 @@ class SendMessageRequestSchema(BaseModel):
     """
     Request schema for sending a message in a conversation.
     """
-    message: str
+    content: str
 
 
 class SourceSchema(BaseModel):
@@ -77,6 +84,7 @@ class SourceSchema(BaseModel):
     filename: str
     page_number: Optional[int] = None
     snippet: str
+    source_type: str = "pdf"
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -90,6 +98,16 @@ class MessageResponseSchema(BaseModel):
     role: MessageRole
     content: str
     sources: Optional[List[SourceSchema]] = None
+    referenced_files: Optional[List[str]] = []
+    answer_mode: Optional[Literal["grounded", "general_knowledge"]] = None
+    conversation_title: Optional[str] = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class UpdateConversationRequestSchema(BaseModel):
+    """
+    Request schema for updating conversation attributes (e.g. is_pinned).
+    """
+    is_pinned: bool

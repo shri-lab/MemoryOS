@@ -7,6 +7,12 @@ export interface User {
     id: string;
     email: string;
     created_at: string;
+    theme_preference?: string;
+    preferences?: {
+        default_search_top_k: number;
+        default_landing_page: 'dashboard' | 'last-visited';
+        chat_auto_title_enabled: boolean;
+    };
 }
 
 /**

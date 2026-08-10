@@ -7,12 +7,15 @@ import Login from './pages/Login';
 import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
 import PdfLibrary from './pages/PdfLibrary';
-import UniversalSearch from './pages/UniversalSearch';
+import ImageLibrary from './pages/ImageLibrary';
+import Chat from './pages/Chat';
+import KnowledgeGraph from './pages/KnowledgeGraph';
+import Settings from './pages/Settings';
 import ComingSoon from './pages/ComingSoon';
-import AiChat from './pages/AiChat';
 import AuthCallback from './pages/AuthCallback';
 import ProtectedRoute from './components/ProtectedRoute';
 import AppShell from './components/AppShell';
+import { useThemeStore } from './store/themeStore';
 
 /**
  * Main Application Component.
@@ -20,6 +23,10 @@ import AppShell from './components/AppShell';
  * on mount if a JWT token is present in the local storage.
  */
 export default function App() {
+    // Initialize global theme state
+    useThemeStore();
+
+    const reconcileWithBackend = useThemeStore((state) => state.reconcileWithBackend);
     const token = useAuthStore((state) => state.token);
     const user = useAuthStore((state) => state.user);
     const setUser = useAuthStore((state) => state.setUser);
@@ -35,6 +42,9 @@ export default function App() {
                 try {
                     const res = await api.get<User>('/auth/me');
                     setUser(res.data);
+                    if (res.data.theme_preference) {
+                        reconcileWithBackend(res.data.theme_preference as any);
+                    }
                 } catch (err) {
                     console.error('Failed to initialize user session:', err);
                     logout();
@@ -46,7 +56,7 @@ export default function App() {
             }
         };
         initUser();
-    }, [token, user, setUser, logout]);
+    }, [token, user, setUser, logout, reconcileWithBackend]);
 
     if (initializing) {
         return (
@@ -81,7 +91,7 @@ export default function App() {
     return (
         <Router>
             <Routes>
-                <Route path="/" element={<Home />} />
+                <Route path="/" element={<Navigate to="/dashboard" replace />} />
                 <Route path="/login" element={<Login />} />
                 <Route path="/register" element={<Register />} />
                 <Route path="/auth/callback" element={<AuthCallback />} />
@@ -94,11 +104,12 @@ export default function App() {
                 >
                     <Route path="/dashboard" element={<Dashboard />} />
                     <Route path="/pdf-library" element={<PdfLibrary />} />
-                    <Route path="/search" element={<UniversalSearch />} />
-                    <Route path="/chat" element={<AiChat />} />
-                    <Route path="/screenshots" element={<ComingSoon title="Screenshots" />} />
-                    <Route path="/graph" element={<ComingSoon title="Knowledge Graph" />} />
-                    <Route path="/settings" element={<ComingSoon title="Settings" />} />
+                    <Route path="/images" element={<ImageLibrary />} />
+                    <Route path="/chat" element={<Chat />} />
+                    <Route path="/chat/:conversationId" element={<Chat />} />
+                    <Route path="/screenshots" element={<Navigate to="/images" replace />} />
+                    <Route path="/graph" element={<KnowledgeGraph />} />
+                    <Route path="/settings" element={<Settings />} />
                 </Route>
                 <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>

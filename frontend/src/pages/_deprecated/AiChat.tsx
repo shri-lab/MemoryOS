@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Send, ArrowRight, Loader2, Sparkles, AlertCircle, RefreshCw } from 'lucide-react';
-import api from '../services/api';
-import QaResultCard, { QaSource } from '../components/QaResultCard';
+import api from '../../services/api';
+import QaResultCard, { QaSource } from '../../components/QaResultCard';
 
 interface Message {
     id: string;

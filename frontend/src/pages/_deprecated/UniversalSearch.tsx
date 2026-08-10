@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Search, Loader2, AlertCircle, ArrowRight } from 'lucide-react';
-import api from '../services/api';
-import QaResultCard, { QaSource } from '../components/QaResultCard';
+import api from '../../services/api';
+import QaResultCard, { QaSource } from '../../components/QaResultCard';
 
 interface QaResponse {
     question: string;

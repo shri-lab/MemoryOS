@@ -9,6 +9,7 @@ from routes.auth import router as auth_router
 from routes.files import router as files_router
 from routes.search import router as search_router
 from routes.conversations import router as conversations_router
+from routes.graph import router as graph_router
 from config import get_settings
 
 settings = get_settings()
@@ -33,6 +34,7 @@ app.include_router(auth_router)
 app.include_router(files_router)
 app.include_router(search_router)
 app.include_router(conversations_router)
+app.include_router(graph_router)
 
 # trigger reload 6
 

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import api from '../services/api';
 import { useAuthStore, User } from '../store/authStore';
@@ -8,6 +8,7 @@ export default function AuthCallback() {
     const [searchParams] = useSearchParams();
     const setToken = useAuthStore((state) => state.setToken);
     const setUser = useAuthStore((state) => state.setUser);
+    const hasRun = useRef(false);
 
     const [error, setError] = useState<string | null>(null);
 
@@ -17,6 +18,9 @@ export default function AuthCallback() {
             setError('Authorization exchange code is missing.');
             return;
         }
+
+        if (hasRun.current) return;
+        hasRun.current = true;
 
         const exchangeCode = async () => {
             try {
@@ -29,8 +33,11 @@ export default function AuthCallback() {
                 const meRes = await api.get<User>('/auth/me');
                 setUser(meRes.data);
 
-                // 3. Redirect to dashboard
-                navigate('/dashboard');
+                // 3. Redirect to landing page preference
+                const dest = meRes.data.preferences?.default_landing_page === 'last-visited'
+                    ? (localStorage.getItem('memoryos-last-visited') || '/dashboard')
+                    : '/dashboard';
+                navigate(dest);
             } catch (err: any) {
                 console.error('OAuth exchange error:', err);
                 setError('Authorization expired or invalid. Please request a fresh login session.');

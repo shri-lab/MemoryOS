@@ -36,13 +36,15 @@ class FileListItem(BaseModel):
 
 class FileDetail(BaseModel):
     """
-    Detailed schema representing a single file, including any extracted summary.
+    Detailed schema representing a single file, including any extracted summary, tags, and text content.
     """
     id: UUID
     filename: str
     source_type: SourceType
     status: FileStatus
     summary: Optional[str] = None
+    tags: list[str] = []
+    extracted_text: Optional[str] = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -54,5 +56,32 @@ class SummarizeResponseSchema(BaseModel):
     """
     summary: Optional[str] = None
     topics: list[str] = []
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class RelatedFileSchema(BaseModel):
+    """
+    Response schema representing a semantically related file.
+    similarity_score is cosine similarity (0 to 1, higher = more similar).
+    """
+    file_id: UUID
+    filename: str
+    source_type: str
+    similarity_score: float
+    matched_snippet: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class RecentFileItemSchema(BaseModel):
+    """
+    Response schema representing a recently viewed file.
+    """
+    id: UUID
+    filename: str
+    source_type: SourceType
+    status: FileStatus
+    viewed_at: datetime
 
     model_config = ConfigDict(from_attributes=True)

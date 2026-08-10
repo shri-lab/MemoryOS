@@ -4,6 +4,7 @@ Fills in Task 2.3 search schemas.
 """
 
 from uuid import UUID
+from datetime import datetime
 from typing import List, Optional, Literal
 from pydantic import BaseModel, Field
 from constants import TOP_K_RETRIEVAL
@@ -94,3 +95,16 @@ class UnifiedSearchResponseSchema(BaseModel):
     """
     query: str
     results: List[UnifiedSearchResultSchema]
+
+
+class FrequentSearchItemSchema(BaseModel):
+    """
+    Schema representing a frequently searched query item with count and last searched timestamp.
+    query displays in original casing (most recent raw query text).
+    """
+    query: str
+    count: int
+    last_searched_at: datetime
+
+    class Config:
+        from_attributes = True
