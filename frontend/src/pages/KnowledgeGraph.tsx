@@ -534,11 +534,10 @@ export default function KnowledgeGraph() {
                         <div className="absolute top-4 left-4 z-20 pointer-events-none bg-glass/95 backdrop-blur-xl border border-glass-border rounded-2xl shadow-cyan-glow p-3 max-w-xs animate-fadeIn text-ink">
                             <div className="flex items-center space-x-2 mb-1">
                                 <span
-                                    className={`text-[9px] font-mono font-bold uppercase px-1.5 py-0.5 rounded border ${
-                                        hoveredNodeObj.type === 'file'
+                                    className={`text-[9px] font-mono font-bold uppercase px-1.5 py-0.5 rounded border ${hoveredNodeObj.type === 'file'
                                             ? 'bg-primary/20 text-secondary border-secondary/25'
                                             : 'bg-secondary/20 text-secondary border-secondary/25'
-                                    }`}
+                                        }`}
                                 >
                                     {hoveredNodeObj.type}
                                 </span>
@@ -588,19 +587,17 @@ export default function KnowledgeGraph() {
                                 <div
                                     key={file.id}
                                     onClick={() => handleSidebarRowClick(file.id)}
-                                    className={`flex items-center justify-between p-2.5 rounded-2xl border transition-all cursor-pointer select-none duration-150 hover:scale-[1.01] ${
-                                        isSelected
+                                    className={`flex items-center justify-between p-2.5 rounded-2xl border transition-all cursor-pointer select-none duration-150 hover:scale-[1.01] ${isSelected
                                             ? 'bg-primary/20 border-secondary/40 text-secondary font-bold shadow-cyan-glow'
                                             : 'bg-glass/40 border-glass-border hover:border-secondary/40 text-ink hover:bg-glass/80'
-                                    } ${!isMatch ? 'opacity-30' : 'opacity-100'}`}
+                                        } ${!isMatch ? 'opacity-30' : 'opacity-100'}`}
                                 >
                                     <div className="flex items-center space-x-2.5 min-w-0 flex-1">
                                         <div
-                                            className={`p-1.5 rounded-full shrink-0 ${
-                                                isSelected
+                                            className={`p-1.5 rounded-full shrink-0 ${isSelected
                                                     ? 'bg-secondary text-obsidian shadow-cyan-glow'
                                                     : 'bg-secondary/15 text-secondary'
-                                            }`}
+                                                }`}
                                         >
                                             {file.source_type === 'screenshot' ? (
                                                 <ImageIcon className="w-3.5 h-3.5" />
@@ -615,7 +612,7 @@ export default function KnowledgeGraph() {
                                     <button
                                         onClick={(e) => {
                                             e.stopPropagation();
-                                            api.post(`/files/${file.id}/view`).catch(() => {});
+                                            api.post(`/files/${file.id}/view`).catch(() => { });
                                             setPreviewFileId(file.id);
                                         }}
                                         className="p-1 text-muted hover:text-secondary hover:bg-glass rounded-md border border-transparent hover:border-glass-border transition-colors ml-2 shrink-0"
